@@ -61,6 +61,9 @@ module PubGrub
         "(root dependency)"
       when :dependency
         "#{terms[0].to_s(allow_every: true)} depends on #{terms[1].invert}"
+      when :feature_dependency
+        activators = terms[0...-1].map { |term| term.to_s(allow_every: true) }.join(" with ")
+        "#{activators} activates #{terms[-1].invert}"
       when PubGrub::Incompatibility::InvalidDependency
         "#{terms[0].to_s(allow_every: true)} depends on unknown package #{cause.package}"
       when PubGrub::Incompatibility::NoVersions

@@ -1,9 +1,11 @@
 require_relative "pub_grub/package"
+require_relative "pub_grub/dependency"
 require_relative "pub_grub/static_package_source"
 require_relative "pub_grub/term"
 require_relative "pub_grub/version_range"
 require_relative "pub_grub/version_constraint"
 require_relative "pub_grub/version_union"
+require_relative "pub_grub/feature_activation"
 require_relative "pub_grub/version_solver"
 require_relative "pub_grub/incompatibility"
 require_relative 'pub_grub/solve_failure'

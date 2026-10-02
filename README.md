@@ -26,6 +26,55 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+### Features
+
+Packages may declare optional _features_ (similar to Cargo features). A
+dependency edge can request features and can opt out of default
+features:
+
+``` ruby
+source = PubGrub::StaticPackageSource.new do |s|
+  s.add 'app', '1.0.0', deps: {
+    'net' => { constraint: '>= 1.0', features: ['tls'] },
+  }
+  s.add 'cli', '1.0.0', deps: {
+    'net' => { constraint: '>= 1.0', default_features: false },
+  }
+
+  s.add 'net', '1.0.0', features: {
+    'default' => ['compression'],
+    'tls' => [{ 'native-tls' => '>= 0.1' }], # a feature may pull in packages
+    'compression' => [],
+  }
+
+  s.add 'native-tls', '1.0.0'
+
+  s.root deps: { 'app' => '>= 1.0', 'cli' => '>= 1.0' }
+end
+
+solver = PubGrub::VersionSolver.new(source: source)
+solver.solve    # => includes "native-tls"
+solver.features # => { "net" => ["compression", "default", "tls"] }
+```
+
+Feature semantics:
+
+* Features requested by different dependency edges are united; the same
+  package entering the solution via multiple paths ends up with every
+  requested feature enabled.
+* Default features are enabled when _any_ incoming edge requests them.
+  An edge with `default_features: false` only withholds its own
+  request — it cannot disable defaults requested by another edge.
+* A feature may enable other features of the same package or pull in
+  additional packages (optionally with their own feature requests).
+  Feature declarations may be cyclic; the closure is computed over the
+  finite declared feature tables.
+* Activation state is tied to the solver's decisions: backtracking
+  retracts the edges and feature dependencies introduced by the undone
+  decisions, so no activation state unique to an abandoned path
+  survives.
+
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.

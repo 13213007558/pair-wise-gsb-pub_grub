@@ -3,6 +3,7 @@ require_relative 'term'
 require_relative 'incompatibility'
 require_relative 'solve_failure'
 require_relative 'strategy'
+require_relative 'feature_activation'
 
 module PubGrub
   class VersionSolver
@@ -26,11 +27,31 @@ module PubGrub
 
       @solution = PartialSolution.new
 
+      # Feature activation is only tracked for sources which declare
+      # features (see StaticPackageSource)
+      @features_enabled = source.respond_to?(:features_for)
+      if @features_enabled
+        @feature_activation = FeatureActivation.new(source)
+        # Incompatibilities introduced by active feature dependencies.
+        # Unlike version dependency incompatibilities, these are
+        # conditional: they are retracted when the activation which
+        # introduced them is rolled back.
+        @feature_incompatibilities = {}
+      end
+
       add_incompatibility Incompatibility.new([
         Term.new(VersionConstraint.any(root), false)
       ], cause: :root)
 
       propagate(root)
+    end
+
+    # The features activated on each package by the current solution,
+    # in the form of { package => [feature, ...] }
+    def features
+      return {} unless @features_enabled
+
+      @feature_activation.features
     end
 
     def solved?
@@ -140,11 +161,101 @@ module PubGrub
         logger.info { "selected #{package} #{version}" }
 
         solution.decide(package, version)
+        activate_features_for(package, version) if @features_enabled
       else
         logger.info { "conflict: #{conflict.inspect}" }
       end
 
       package
+    end
+
+    # Register the dependency edges of a freshly decided version and
+    # activate any features they request
+    def activate_features_for(package, version)
+      deps =
+        if Package.root?(package)
+          source.root_dependencies
+        else
+          source.dependencies_for(package, version)
+        end
+
+      level = solution.decision_level
+      deps.each do |dep_package, dependency|
+        @feature_activation.add_edge(package, version, dep_package, dependency, level)
+      end
+
+      sync_feature_dependencies.each do |changed_package|
+        propagate(changed_package) unless changed_package == package
+      end
+    end
+
+    # Drop the edges introduced by retracted decisions and retract any
+    # feature dependency incompatibilities which are no longer active,
+    # so no activation state unique to the abandoned path survives
+    def rollback_features(level)
+      @feature_activation.backtrack(level)
+      sync_feature_dependencies
+    end
+
+    # Recompute feature activation and reconcile the feature dependency
+    # incompatibilities with it, adding newly activated ones and
+    # retracting deactivated ones.
+    #
+    # Returns the packages whose incompatibilities were added and thus
+    # need propagation.
+    def sync_feature_dependencies
+      @feature_activation.recompute(solution.decisions)
+
+      desired = {}
+      @feature_activation.feature_dependencies.each do |from, version, dep_package, dependency, edges|
+        edges.each do |edge|
+          incompatibility = build_feature_incompatibility(from, version, dep_package, dependency, edge)
+          desired[incompatibility] = true
+        end
+      end
+
+      @feature_incompatibilities.each_key do |incompatibility|
+        next if desired.key?(incompatibility)
+
+        incompatibility.terms.each do |term|
+          @incompatibilities[term.package].delete(incompatibility)
+        end
+      end
+      @feature_incompatibilities.keep_if { |incompatibility, _| desired.key?(incompatibility) }
+
+      changed = []
+      desired.each_key do |incompatibility|
+        next if @feature_incompatibilities.key?(incompatibility)
+
+        @feature_incompatibilities[incompatibility] = true
+        add_incompatibility(incompatibility)
+        changed << incompatibility.terms.first.package
+      end
+      changed
+    end
+
+    # A feature dependency is conditional both on the version declaring
+    # it and on the decision whose edge activated the feature, so that
+    # backtracking either one dissolves it
+    def build_feature_incompatibility(package, version, dep_package, dependency, activator)
+      terms = [Term.new(VersionConstraint.exact(package, version), true)]
+      if activator && !Package.root?(activator.from)
+        terms << Term.new(VersionConstraint.exact(activator.from, activator.from_version), true)
+      end
+
+      dep_constraint = source.parse_dependency(dep_package, dependency)
+      if !dep_constraint
+        cause = Incompatibility::InvalidDependency.new(dep_package, dependency)
+        return Incompatibility.new(terms, cause: cause)
+      end
+
+      if !dep_constraint.is_a?(VersionConstraint)
+        dep_constraint = VersionConstraint.new(dep_package, range: dep_constraint)
+      end
+      terms << Term.new(dep_constraint, false)
+
+      cause = terms.length == 2 ? :dependency : :feature_dependency
+      Incompatibility.new(terms, cause: cause)
     end
 
     def resolve_conflict(incompatibility)
@@ -190,6 +301,7 @@ module PubGrub
 
           logger.info { "backtracking to #{previous_level}" }
           solution.backtrack(previous_level)
+          rollback_features(previous_level) if @features_enabled
 
           if new_incompatibility
             add_incompatibility(new_incompatibility)
