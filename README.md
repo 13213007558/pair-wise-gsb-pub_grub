@@ -26,6 +26,62 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+## Minimal-change (lockfile-preserving) solving
+
+`PubGrub::MinimalChangeSolver` finds, among all solutions that satisfy
+every dependency, one whose total change cost against an existing
+lockfile is minimal. This avoids the common problem where upgrading one
+direct dependency needlessly rewrites many versions that could have
+been kept.
+
+### Cost model
+
+Given the old lockfile and per-package, non-negative costs, a solution
+is priced as follows:
+
+* **kept**: package in both lockfile and solution at the *same* version
+  costs 0.
+* **changed**: package in both, but at a *different* version, costs
+  `change_costs[package]`.
+* **added**: package in the solution but *not* in the lockfile (newly
+  introduced) costs `added_costs[package]`.
+* **removed**: package in the lockfile but *not* in the solution (no
+  longer required) costs `removed_costs[package]`.
+
+Packages missing from a cost hash default to a cost of 1. Negative
+costs are rejected.
+
+``` ruby
+solver = PubGrub::MinimalChangeSolver.new(
+  source: source,
+  lockfile: { "foo" => Gem::Version.new("1.0.0") },
+  change_costs: { "foo" => 1 },
+  added_costs: Hash.new(5),
+  removed_costs: Hash.new(2),
+  max_solves: 1000, # search budget
+)
+result = solver.solve
+
+result.solution # => {package => version, ...}
+result.cost     # => total change cost of the solution
+result.status   # => :optimal or :feasible
+```
+
+### Optimality, search budget, and the two result states
+
+Simply preferring locked versions during solving is a heuristic, not a
+guarantee: keeping an old version of one package can force expensive
+changes elsewhere. `MinimalChangeSolver` therefore runs a
+branch-and-bound search over PubGrub solutions with per-node cost lower
+bounds, and only reports `:optimal` once the search space is exhausted
+-- i.e. it has been *proven* that no cheaper solution exists.
+
+If the `max_solves` budget runs out first, the best solution found so
+far is returned with status `:feasible`: a valid, usable set of
+versions whose optimality is *not* proven. Callers must check
+`result.status` (or `result.optimal?`) to distinguish "proven no
+cheaper solution exists" from "merely the best found so far".
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
