@@ -26,6 +26,55 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+## Minimal-change solving
+
+When re-resolving against an existing lockfile, any valid solution is not
+enough: you usually want the solution that changes the lockfile the
+least. `PubGrub::MinimalChangeSolver` takes the previous lockfile plus a
+non-negative change cost per package and searches for a solution with the
+lowest total cost.
+
+``` ruby
+solver = PubGrub::MinimalChangeSolver.new(
+  source: source,
+  locked: { "foo" => Gem::Version.new("1.0.0") }, # previous lockfile
+  costs: { "foo" => 5 },                          # per-package weight, default 1
+  max_nodes: 1000,                                # optional search budget
+)
+result = solver.solve
+
+result.solution # => {"foo"=>#<Gem::Version "1.0.0">, ...} (root not included)
+result.cost     # => 0
+result.status   # => :optimal (proven cheapest) or :feasible (best so far)
+result.optimal? # => true
+```
+
+### Cost model
+
+The cost of a solution is the sum over all packages (in the solution, the
+lockfile, or both) of:
+
+* **0** if the package keeps its locked version
+* **cost(package)** if the package is locked but selected at a different version
+* **cost(package)** if the package is **added** (selected, but not locked)
+* **cost(package)** if the package is **removed** (locked, but not selected)
+
+Costs default to 1 and must be non-negative. Locked versions are compared
+with `==`, so they should be the same objects the package source returns.
+
+### Optimality
+
+Preferring locked versions is only a heuristic — keeping an old version of
+one package can force more expensive changes elsewhere. The solver
+therefore runs a branch-and-bound search (using PubGrub to complete each
+partial assignment) and only reports `status == :optimal` once every
+branch that could still hide a strictly cheaper solution has been explored
+or pruned by an admissible lower bound.
+
+If the `max_nodes` budget runs out first, the cheapest solution found so
+far is returned with `status == :feasible` (`optimal? == false`): a
+valid, usable set of versions, but a cheaper one may still exist.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
