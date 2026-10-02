@@ -5,6 +5,7 @@ require_relative "pub_grub/version_range"
 require_relative "pub_grub/version_constraint"
 require_relative "pub_grub/version_union"
 require_relative "pub_grub/version_solver"
+require_relative "pub_grub/multi_platform_package_source"
 require_relative "pub_grub/incompatibility"
 require_relative 'pub_grub/solve_failure'
 require_relative 'pub_grub/failure_writer'
@@ -16,6 +17,12 @@ module PubGrub
 
     def logger
       @logger || default_logger
+    end
+
+    def solve_for_platforms(platforms, &block)
+      source = MultiPlatformPackageSource.new(platforms, &block)
+      solution = VersionSolver.new(source: source).solve
+      source.result_for(solution)
     end
 
     private

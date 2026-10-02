@@ -26,6 +26,34 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+### Multiple platforms
+
+`solve_for_platforms` solves all targets in one joint resolution. A package selected
+for more than one target has exactly one version in the result.
+
+``` ruby
+result = PubGrub.solve_for_platforms([:linux, :macos]) do |s|
+  s.root deps: { "app" => "1.0.0" }
+
+  # This version and its dependencies apply on both targets.
+  s.add "app", "1.0.0", platform_deps: {
+    "linux-only" => { requirement: "1.0.0", platforms: :linux },
+    "macos-only" => { requirement: "1.0.0", platforms: :macos }
+  }
+  s.add "linux-only", "1.0.0", platforms: :linux
+  s.add "macos-only", "1.0.0", platforms: :macos
+end
+
+result.common     # Packages needed on every target
+result[:linux]    # Packages needed only on linux
+result[:macos]    # Packages needed only on macos
+```
+
+`platforms` limits where a package version is available. `deps` applies on every
+platform where that parent version is available; `platform_deps` applies only on
+the listed platforms. If no single version satisfies every platform that needs a
+package, the failure explanation names those platform conditions.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
