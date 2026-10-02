@@ -26,6 +26,39 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+### Solving several platforms with one lockfile
+
+`MultiPlatformPackageSource` solves multiple target platforms (for example
+Linux and macOS) in a single pass. It never solves each platform separately
+and merges the results: a package needed on more than one platform must pick
+the exact same version everywhere. Versions can declare the platforms on
+which they are available, and dependencies can declare the platforms on
+which they take effect.
+
+``` ruby
+source = PubGrub::MultiPlatformPackageSource.new(:linux, :macos) do |s|
+  s.root linux: { 'app' => '1.0.0' }, macos: { 'app' => '1.0.0' }
+
+  s.add 'app', '1.0.0', deps: {
+    'shared' => '>= 1.0',
+    # Platform-only dependency
+    'kqueue' => s.on(:macos) { '~> 1.0' }
+  }
+
+  s.add 'shared', '1.2.0'
+  # A version available on one platform only
+  s.add 'kqueue', '1.0.0', platforms: [:macos]
+end
+
+result = PubGrub.solve_for_platforms(source)
+result.common   # {"app"=>#<Gem::Version "1.0.0">, "shared"=>#<Gem::Version "1.2.0">}
+result.only_on  # {:macos=>{"kqueue"=>#<Gem::Version "1.0.0">}}
+result.for_platform(:linux) # shared + platform-only packages for linux
+```
+
+If no single set of versions satisfies every platform, a `PubGrub::SolveFailure`
+is raised whose explanation names the conflicting platform conditions.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.

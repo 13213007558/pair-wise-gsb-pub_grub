@@ -11,6 +11,18 @@ module PubGrub
     NoVersions = Struct.new(:constraint) do
     end
 
+    # A package is needed on more than one target platform, but the versions
+    # selected for those platforms do not match. The single shared lockfile
+    # only allows one version of a given package across every platform that
+    # needs it.
+    PlatformVersionMismatch = Struct.new(:package, :version, :platforms) do
+      def to_s
+        list = platforms.map { |platform| "`#{platform}`" }.join(" and ")
+        "#{package} #{version} is not a version shared by every platform " \
+          "that needs #{package} (conflicting platform conditions: #{list})"
+      end
+    end
+
     attr_reader :terms, :cause
 
     def initialize(terms, cause:, custom_explanation: nil)
@@ -65,6 +77,8 @@ module PubGrub
         "#{terms[0].to_s(allow_every: true)} depends on unknown package #{cause.package}"
       when PubGrub::Incompatibility::NoVersions
         "no versions satisfy #{cause.constraint}"
+      when PubGrub::Incompatibility::PlatformVersionMismatch
+        cause.to_s
       when PubGrub::Incompatibility::ConflictCause
         if failure?
           "version solving has failed"

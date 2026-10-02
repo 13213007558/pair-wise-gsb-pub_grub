@@ -24,6 +24,10 @@ module PubGrub
 
       @seen_incompatibilities = {}
 
+      # Packages brought into scope by a decision that must be re-propagated
+      # before choosing the next version (see choose_package_version_from).
+      @repropagate = []
+
       @solution = PartialSolution.new
 
       add_incompatibility Incompatibility.new([
@@ -39,6 +43,11 @@ module PubGrub
 
     # Returns true if there is more work to be done, false otherwise
     def work
+      until @repropagate.empty?
+        next_package = @repropagate.shift
+        propagate(next_package)
+      end
+
       unsatisfied_terms = solution.unsatisfied
       if unsatisfied_terms.empty?
         logger.info { "Solution found after #{solution.attempted_solutions} attempts:" }
@@ -67,20 +76,7 @@ module PubGrub
     private
 
     def propagate(initial_package)
-      changed = [initial_package]
-      while package = changed.shift
-        @incompatibilities[package].reverse_each do |incompatibility|
-          result = propagate_incompatibility(incompatibility)
-          if result == :conflict
-            root_cause = resolve_conflict(incompatibility)
-            changed.clear
-            changed << propagate_incompatibility(root_cause)
-          elsif result # should be a Package
-            changed << result
-          end
-        end
-        changed.uniq!
-      end
+      propagate_queue([initial_package])
     end
 
     def propagate_incompatibility(incompatibility)
@@ -121,6 +117,7 @@ module PubGrub
       end
 
       conflict = false
+      newly_related_packages = []
 
       source.incompatibilities_for(package, version).each do |incompatibility|
         if @seen_incompatibilities.include?(incompatibility)
@@ -131,6 +128,21 @@ module PubGrub
 
         add_incompatibility incompatibility
 
+        # Track the other packages referenced by newly learned
+        # incompatibilities. After a decision they are re-propagated (at the
+        # start of the next #work call) so that incompatibilities spanning
+        # more than one independently decided package -- such as
+        # cross-platform version-coupling terms, which use two positive terms
+        # -- are checked. Dependency terms are negative and are already
+        # handled when the other package is decided later, so skip them.
+        incompatibility.terms.each do |term|
+          other = term.package
+          next if other == package
+          next unless term.positive?
+
+          newly_related_packages << other
+        end
+
         conflict ||= incompatibility.terms.all? do |term|
           term.package == package || solution.satisfies?(term)
         end
@@ -140,11 +152,28 @@ module PubGrub
         logger.info { "selected #{package} #{version}" }
 
         solution.decide(package, version)
+        @repropagate.concat(newly_related_packages)
       else
         logger.info { "conflict: #{conflict.inspect}" }
       end
 
       package
+    end
+
+    def propagate_queue(changed)
+      while current_package = changed.shift
+        @incompatibilities[current_package].reverse_each do |incompatibility|
+          result = propagate_incompatibility(incompatibility)
+          if result == :conflict
+            root_cause = resolve_conflict(incompatibility)
+            changed.clear
+            changed << propagate_incompatibility(root_cause)
+          elsif result # should be a Package
+            changed << result
+          end
+        end
+        changed.uniq!
+      end
     end
 
     def resolve_conflict(incompatibility)
