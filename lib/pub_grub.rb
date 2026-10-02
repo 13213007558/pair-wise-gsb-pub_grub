@@ -1,4 +1,6 @@
 require_relative "pub_grub/package"
+require_relative "pub_grub/feature_package"
+require_relative "pub_grub/feature_dependency"
 require_relative "pub_grub/static_package_source"
 require_relative "pub_grub/term"
 require_relative "pub_grub/version_range"

@@ -3,6 +3,7 @@ require_relative 'term'
 require_relative 'incompatibility'
 require_relative 'solve_failure'
 require_relative 'strategy'
+require_relative 'feature_package'
 
 module PubGrub
   class VersionSolver
@@ -43,7 +44,7 @@ module PubGrub
       if unsatisfied_terms.empty?
         logger.info { "Solution found after #{solution.attempted_solutions} attempts:" }
         solution.decisions.each do |package, version|
-          next if Package.root?(package)
+          next if Package.root?(package) || FeaturePackage.feature?(package)
           logger.info { "* #{package} #{version}" }
         end
 
@@ -59,10 +60,23 @@ module PubGrub
     def solve
       while work; end
 
-      solution.decisions
+      package_decisions
     end
 
     alias_method :result, :solve
+
+    def activated_features
+      solution.decisions.each_with_object({}) do |(package, _version), activated|
+      next unless FeaturePackage.feature?(package)
+      (activated[package.package] ||= []) << package.feature
+    end.transform_values(&:sort)
+    end
+
+    def package_decisions
+      solution.decisions.reject do |package, _version|
+        FeaturePackage.feature?(package)
+      end
+    end
 
     private
 

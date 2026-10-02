@@ -11,6 +11,9 @@ module PubGrub
     NoVersions = Struct.new(:constraint) do
     end
 
+    InvalidFeature = Struct.new(:package, :feature) do
+    end
+
     attr_reader :terms, :cause
 
     def initialize(terms, cause:, custom_explanation: nil)
@@ -61,8 +64,13 @@ module PubGrub
         "(root dependency)"
       when :dependency
         "#{terms[0].to_s(allow_every: true)} depends on #{terms[1].invert}"
+      when :feature_dependency
+        "#{terms[0].to_s(allow_every: true)} has incompatible feature requirements"
       when PubGrub::Incompatibility::InvalidDependency
         "#{terms[0].to_s(allow_every: true)} depends on unknown package #{cause.package}"
+      when PubGrub::Incompatibility::InvalidFeature
+        names = Array(cause.feature).join(", ")
+        "#{cause.package} does not have feature(s) #{names}"
       when PubGrub::Incompatibility::NoVersions
         "no versions satisfy #{cause.constraint}"
       when PubGrub::Incompatibility::ConflictCause

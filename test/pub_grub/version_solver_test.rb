@@ -409,6 +409,158 @@ module PubGrub
       }
     end
 
+    def test_feature_dependency_accepts_hash_syntax
+      source = StaticPackageSource.new do |s|
+        s.root deps: { 'a' => '1.0.0' }
+        s.add 'a', '1.0.0', deps: {
+          'shared' => { version: '1.0.0', features: [:tls], default_features: false }
+        }
+        s.add 'shared', '1.0.0', features: { tls: {} }
+      end
+
+      solver = VersionSolver.new(source: source)
+      assert_solution source, solver.solve, { 'a' => '1.0.0', 'shared' => '1.0.0' }
+      assert_equal({ 'shared' => [:tls] }, solver.activated_features)
+    end
+
+    def test_feature_requests_from_multiple_paths_are_merged
+      source = StaticPackageSource.new do |s|
+        s.root deps: { 'a' => '1.0.0', 'b' => '1.0.0' }
+
+        s.add 'a', '1.0.0', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:tls], default_features: false)
+        }
+        s.add 'b', '1.0.0', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:compression], default_features: false)
+        }
+        s.add 'shared', '1.0.0', features: {
+          tls: {
+            dependencies: { 'tls-lib' => '1.0.0' },
+            features: [:compression]
+          },
+          compression: {
+            dependencies: { 'compression-lib' => '1.0.0' },
+            features: [:tls]
+          }
+        }
+        s.add 'tls-lib', '1.0.0'
+        s.add 'compression-lib', '1.0.0'
+      end
+
+      solver = VersionSolver.new(source: source)
+      result = solver.solve
+
+      assert_solution source, result, {
+        'a' => '1.0.0',
+        'b' => '1.0.0',
+        'shared' => '1.0.0',
+        'tls-lib' => '1.0.0',
+        'compression-lib' => '1.0.0'
+      }
+      assert_equal({ 'shared' => [:compression, :tls] }, solver.activated_features)
+    end
+
+    def test_default_features_are_unioned_across_incoming_edges
+      source = StaticPackageSource.new do |s|
+        s.root deps: { 'a' => '1.0.0', 'b' => '1.0.0' }
+
+        s.add 'a', '1.0.0', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:tls])
+        }
+        s.add 'b', '1.0.0', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:compression], default_features: false)
+        }
+        s.add 'shared', '1.0.0', features: {
+          default: { dependencies: { 'default-lib' => '1.0.0' } },
+          tls: {},
+          compression: {}
+        }
+        s.add 'default-lib', '1.0.0'
+      end
+
+      solver = VersionSolver.new(source: source)
+
+      assert_solution source, solver.solve, {
+        'a' => '1.0.0',
+        'b' => '1.0.0',
+        'shared' => '1.0.0',
+        'default-lib' => '1.0.0'
+      }
+      assert_equal({ 'shared' => [:compression, :default, :tls] }, solver.activated_features)
+    end
+
+    def test_default_features_can_be_explicitly_disabled
+      source = StaticPackageSource.new do |s|
+        s.root deps: { 'a' => '1.0.0' }
+
+        s.add 'a', '1.0.0', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:tls], default_features: false)
+        }
+        s.add 'shared', '1.0.0', features: {
+          default: { dependencies: { 'default-lib' => '1.0.0' } },
+          tls: {}
+        }
+        s.add 'default-lib', '1.0.0'
+      end
+
+      solver = VersionSolver.new(source: source)
+
+      assert_solution source, solver.solve, {
+        'a' => '1.0.0',
+        'shared' => '1.0.0'
+      }
+      assert_equal({ 'shared' => [:tls] }, solver.activated_features)
+    end
+
+    def test_self_referential_feature_request_is_retained
+      source = StaticPackageSource.new do |s|
+        s.root deps: { 'shared' => '1.0.0' }
+        s.add 'shared', '1.0.0', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:tls], default_features: false)
+        }, features: { tls: {} }
+      end
+
+      solver = VersionSolver.new(source: source)
+
+      assert_solution source, solver.solve, { 'shared' => '1.0.0' }
+      assert_equal({ 'shared' => [:tls] }, solver.activated_features)
+    end
+
+    def test_feature_dependencies_are_removed_during_backtracking
+      source = StaticPackageSource.new do |s|
+        s.root deps: {
+          'a' => '>= 0',
+          'b' => '1.0.0',
+          'required' => '1.0.0'
+        }
+
+        s.add 'a', '1.0.0.alpha', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:tls], default_features: false)
+        }
+        s.add 'a', '1.0.0'
+        s.add 'b', '1.0.0', deps: {
+          'shared' => FeatureDependency.new('1.0.0', features: [:compression], default_features: false)
+        }
+        s.add 'shared', '1.0.0', features: {
+          tls: { dependencies: { 'required' => '2.0.0' } },
+          compression: {}
+        }
+        s.add 'required', '2.0.0'
+        s.add 'required', '1.0.0'
+      end
+
+      solver = VersionSolver.new(source: source)
+      result = solver.solve
+
+      assert_solution source, result, {
+        'a' => '1.0.0',
+        'b' => '1.0.0',
+        'shared' => '1.0.0',
+        'required' => '1.0.0'
+      }
+      assert_equal({ 'shared' => [:compression] }, solver.activated_features)
+    end
+
     def test_requirements_with_disjoint_unbounded_ranges
       source = StaticPackageSource.new do |s|
         s.root deps: { 'inspec' => '5.22.3', "ruby" => "3.2.2" }

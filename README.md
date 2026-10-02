@@ -26,6 +26,27 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+## Features
+
+Package versions can declare named features. A feature may activate other
+features or require additional packages. Requests from all incoming edges are
+unioned; a later edge with `default_features: false` does not disable the
+default feature when another edge still requests it.
+
+```ruby
+s.add 'shared', '1.0.0', features: {
+  default: { dependencies: { 'logging' => '1.0.0' } },
+  tls: { dependencies: { 'openssl' => '1.0.0' } },
+  compression: { dependencies: { 'zlib' => '1.0.0' }, features: [:tls] }
+}
+
+s.add 'client', '1.0.0', deps: {
+  'shared' => PubGrub::FeatureDependency.new('1.0.0', features: [:compression])
+}
+```
+
+Use `VersionSolver#activated_features` to inspect the activated feature set.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.

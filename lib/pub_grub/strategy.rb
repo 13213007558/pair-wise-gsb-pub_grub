@@ -26,7 +26,8 @@ module PubGrub
     def most_preferred_version_of(package, range)
       versions = @source.versions_for(package, range)
 
-      indexes = @version_indexes[package]
+      index_package = FeaturePackage.feature?(package) ? package.package : package
+      indexes = @version_indexes[index_package]
       versions.min_by { |version| indexes[version] }
     end
 

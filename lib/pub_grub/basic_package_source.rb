@@ -1,5 +1,7 @@
 require_relative 'version_constraint'
 require_relative 'incompatibility'
+require_relative 'feature_package'
+require_relative 'feature_dependency'
 
 module PubGrub
   # Types:
@@ -57,6 +59,18 @@ module PubGrub
       raise NotImplementedError
     end
 
+    # Override me to declare features available for a package version.
+    #
+    # Return a Hash in the form:
+    #   { feature_name => { dependencies: { package => requirement }, features: [:other_feature] } }
+    #
+    # A feature declaration may also be just an Array of other features. The
+    # feature named :default is activated for ordinary dependencies unless that
+    # dependency explicitly sets default_features: false.
+    def features_for(_package, _version)
+      {}
+    end
+
     # Override me!
     #
     # Convert a (user-defined) dependency into a format PubGrub understands.
@@ -102,9 +116,22 @@ module PubGrub
           end
         end
       end
+
+      @cached_features = Hash.new do |packages, package|
+        packages[package] = Hash.new do |versions, version|
+          normalize_features(features_for(package, version))
+        end
+      end
     end
 
     def versions_for(package, range=VersionRange.any)
+      if FeaturePackage.feature?(package)
+        versions = @sorted_versions[package.package].select do |version|
+          @cached_features[package.package][version].key?(package.feature)
+        end
+        return range.select_versions(versions)
+      end
+
       range.select_versions(@sorted_versions[package])
     end
 
@@ -115,9 +142,11 @@ module PubGrub
     end
 
     def incompatibilities_for(package, version)
+      return feature_incompatibilities_for(package, version) if FeaturePackage.feature?(package)
+
       package_deps = @cached_dependencies[package]
       sorted_versions = @sorted_versions[package]
-      package_deps[version].map do |dep_package, dep_constraint_name|
+      package_deps[version].flat_map do |dep_package, dep_constraint_name|
         low = high = sorted_versions.index(version)
 
         # find version low such that all >= low share the same dep
@@ -148,21 +177,141 @@ module PubGrub
 
         self_constraint = VersionConstraint.new(package, range: range)
 
-        if !@packages.include?(dep_package)
-          # no such package -> this version is invalid
+        dependency_incompatibilities(self_constraint, dep_package, dep_constraint_name)
+      end
+    end
+
+    private
+
+    def dependency_request(dependency)
+      FeatureDependency.coerce(dependency)
+    end
+
+    def dependency_incompatibilities(self_constraint, dep_package, raw_dependency)
+      request = dependency_request(raw_dependency)
+      dependency_for_parsing =
+        if FeatureDependency.feature_dependency?(raw_dependency) || raw_dependency.is_a?(Hash)
+          request.constraint
+        else
+          raw_dependency
+        end
+      dep_constraint = parse_dependency(dep_package, dependency_for_parsing)
+
+      if !dep_constraint
+        cause = Incompatibility::InvalidDependency.new(dep_package, request.constraint)
+        return [Incompatibility.new([Term.new(self_constraint, true)], cause: cause)]
+      elsif !dep_constraint.is_a?(VersionConstraint)
+        dep_constraint = VersionConstraint.new(dep_package, range: dep_constraint)
+      end
+
+      incompatibilities = []
+      feature_self_dependency =
+        self_constraint.package == dep_package &&
+          FeatureDependency.feature_dependency?(raw_dependency) &&
+            (!request.features.empty? || !request.default_features)
+
+      unless feature_self_dependency
+        incompatibilities << Incompatibility.new([
+          Term.new(self_constraint, true),
+          Term.new(dep_constraint, false)
+        ], cause: :dependency)
+      end
+      if FeatureDependency.feature_dependency?(raw_dependency) || raw_dependency.is_a?(Hash)
+        incompatibilities.concat(feature_request_incompatibilities(self_constraint, dep_package, request, dep_constraint))
+      end
+      incompatibilities
+    end
+
+    def feature_request_incompatibilities(self_constraint, dep_package, request, dep_constraint)
+      versions = versions_for(dep_package, dep_constraint.range)
+      return [] if versions.empty?
+
+      versions.flat_map do |candidate|
+        features = @cached_features[dep_package][candidate]
+        requested_features = request.features.dup
+        requested_features << :default if request.default_features && features.key?(:default)
+        requested_features.uniq!
+
+        feature_packages = requested_features.map do |feature|
+          FeaturePackage.new(dep_package, feature)
         end
 
-        dep_constraint = parse_dependency(dep_package, dep_constraint_name)
-        if !dep_constraint
-          # falsey indicates this dependency was invalid
-          cause = PubGrub::Incompatibility::InvalidDependency.new(dep_package, dep_constraint_name)
-          return [Incompatibility.new([Term.new(self_constraint, true)], cause: cause)]
-        elsif !dep_constraint.is_a?(VersionConstraint)
-          # Upgrade range/union to VersionConstraint
-          dep_constraint = VersionConstraint.new(dep_package, range: dep_constraint)
+        missing, available = feature_packages.partition do |feature_package|
+          !features.key?(feature_package.feature)
         end
 
-        Incompatibility.new([Term.new(self_constraint, true), Term.new(dep_constraint, false)], cause: :dependency)
+        candidate_incompatibilities = []
+
+        unless missing.empty?
+          terms = [Term.new(self_constraint, true), Term.new(VersionConstraint.exact(dep_package, candidate), true)]
+          candidate_incompatibilities << Incompatibility.new(
+            terms,
+            cause: Incompatibility::InvalidFeature.new(dep_package, missing.map(&:feature))
+          )
+        end
+
+        available.each do |feature_package|
+          terms = [
+            Term.new(self_constraint, true),
+            Term.new(VersionConstraint.exact(dep_package, candidate), true),
+            Term.new(VersionConstraint.exact(feature_package, candidate), false)
+          ]
+          candidate_incompatibilities << Incompatibility.new(terms, cause: :feature_dependency)
+        end
+
+        candidate_incompatibilities
+      end
+    end
+
+    def feature_incompatibilities_for(package, version)
+      features = @cached_features[package.package][version]
+      definition = features[package.feature]
+      self_constraint = VersionConstraint.exact(package, version)
+
+      unless definition
+        cause = Incompatibility::InvalidFeature.new(package.package, package.feature)
+        return [Incompatibility.new([Term.new(self_constraint, true)], cause: cause)]
+      end
+
+      incompatibilities = definition[:dependencies].flat_map do |dep_package, dependency|
+        dependency_incompatibilities(self_constraint, dep_package, dependency)
+      end
+
+      definition[:features].each do |feature|
+        feature_package = FeaturePackage.new(package.package, feature)
+        incompatibilities << Incompatibility.new([
+          Term.new(self_constraint, true),
+          Term.new(VersionConstraint.exact(feature_package, version), false)
+        ], cause: :dependency)
+      end
+
+      incompatibilities
+    end
+
+    def normalize_features(features)
+      features.each_with_object({}) do |(name, definition), normalized|
+        feature_name = name.to_s == "default" ? :default : name
+        normalized[feature_name] =
+          case definition
+          when nil
+            { dependencies: {}, features: [] }
+          when Hash
+            dependencies = definition[:dependencies] || definition[:packages]
+            features =
+              if dependencies || definition.key?(:features)
+                Array(definition[:features])
+              else
+                []
+              end
+            {
+              dependencies: dependencies || (definition.key?(:features) ? {} : definition),
+              features: features
+            }
+          when Array
+            { dependencies: {}, features: definition }
+          else
+            raise ArgumentError, "invalid feature declaration for #{name}: #{definition.inspect}"
+          end
       end
     end
   end
