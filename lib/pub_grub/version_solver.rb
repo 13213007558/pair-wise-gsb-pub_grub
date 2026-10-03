@@ -59,7 +59,7 @@ module PubGrub
     def solve
       while work; end
 
-      solution.decisions
+      materialize_solution
     end
 
     alias_method :result, :solve
@@ -231,6 +231,26 @@ module PubGrub
         package = term.package
         @incompatibilities[package] << incompatibility
       end
+    end
+
+    def materialize_solution
+      provisions = {}
+      result = Solution.new(provisions)
+
+      solution.decisions.each do |package, version|
+        if version.is_a?(ProviderVersion)
+          provisions[package] = Provision.new(
+            capability: package,
+            capability_version: version.capability_version,
+            package: version.package,
+            version: version.version
+          )
+        else
+          result[package] = version
+        end
+      end
+
+      result
     end
   end
 end

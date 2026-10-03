@@ -11,6 +11,32 @@ module PubGrub
     NoVersions = Struct.new(:constraint) do
     end
 
+    CapabilityProvision = Struct.new(:capability, :capability_version, :package, :version) do
+      def to_s
+        "#{package} #{version} provides #{capability} #{capability_version}"
+      end
+    end
+
+    MutuallyExclusiveProviders = Struct.new(:capability, :left_package, :left_version, :right_package, :right_version) do
+      def to_s
+        if left_package
+          "#{left_package} #{left_version} is mutually exclusive with #{right_package} #{right_version} (different #{capability} implementations)"
+        else
+          "implementations of #{capability} are mutually exclusive"
+        end
+      end
+    end
+
+    NoProviders = Struct.new(:capability, :providers) do
+      def to_s
+        if providers && !providers.empty?
+          "no acceptable provider of #{capability} (excluded: #{providers.join(", ")})"
+        else
+          "no package provides #{capability}"
+        end
+      end
+    end
+
     attr_reader :terms, :cause
 
     def initialize(terms, cause:, custom_explanation: nil)
@@ -49,7 +75,7 @@ module PubGrub
           cause.other
         ].flat_map(&:external_incompatibilities)
       else
-        [this]
+        [self]
       end
     end
 
@@ -59,6 +85,8 @@ module PubGrub
       case cause
       when :root
         "(root dependency)"
+      when CapabilityProvision, MutuallyExclusiveProviders, NoProviders
+        cause.to_s
       when :dependency
         "#{terms[0].to_s(allow_every: true)} depends on #{terms[1].invert}"
       when PubGrub::Incompatibility::InvalidDependency

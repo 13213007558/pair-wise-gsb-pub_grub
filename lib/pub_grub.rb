@@ -6,6 +6,8 @@ require_relative "pub_grub/version_constraint"
 require_relative "pub_grub/version_union"
 require_relative "pub_grub/version_solver"
 require_relative "pub_grub/incompatibility"
+require_relative "pub_grub/provider_version"
+require_relative "pub_grub/solution"
 require_relative 'pub_grub/solve_failure'
 require_relative 'pub_grub/failure_writer'
 require_relative 'pub_grub/version'

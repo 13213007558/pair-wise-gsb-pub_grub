@@ -26,6 +26,29 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+Multiple packages can provide the same capability. The dependency constrains
+the capability version, while the selected package keeps its own package
+version and dependencies:
+
+``` ruby
+source = PubGrub::StaticPackageSource.new do |s|
+  s.add "fast-image", "3.0.0", deps: { "fast-native" => "1.0.0" }
+  s.add "fast-native", "1.0.0"
+  s.add "safe-image", "2.0.0", deps: { "safe-decoder" => "1.0.0" }
+  s.add "safe-decoder", "1.0.0"
+
+  s.provides "image-reader", "2.0.0", by: "fast-image", version: "3.0.0"
+  s.provides "image-reader", "2.0.0", by: "safe-image", version: "2.0.0"
+  s.root deps: { "image-reader" => ">= 2.0" }
+end
+
+result = PubGrub::VersionSolver.new(source: source).solve
+result.keys # => real packages only
+result.provisions["image-reader"] # => capability, capability version, package, package version
+```
+
+Packages providing the same capability are treated as mutually exclusive.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
