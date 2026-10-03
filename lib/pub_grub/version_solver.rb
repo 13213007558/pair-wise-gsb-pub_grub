@@ -222,7 +222,7 @@ module PubGrub
         logger.info { "! thus #{incompatibility}" }
       end
 
-      raise SolveFailure.new(incompatibility)
+      raise SolveFailure.new(incompatibility, source: source)
     end
 
     def add_incompatibility(incompatibility)

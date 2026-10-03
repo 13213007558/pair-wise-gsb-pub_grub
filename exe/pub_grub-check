@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+# Independent checker for PubGrub unsatisfiability certificates.
+#
+# Usage:
+#   pub_grub-check CERTIFICATE.json [--manifest-sha256 HEX]
+#
+# Verifies, without re-running any search, that the certificate's
+# derivation steps follow from its frozen package manifest and that
+# the final contradiction is derived from the root request.
+
+require "json"
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+require "pub_grub"
+
+pinned_digest = nil
+args = []
+
+ARGV.each do |arg|
+  case arg
+  when /\A--manifest-sha256=(.+)/
+    pinned_digest = $1
+  when "--manifest-sha256"
+    warn "error: --manifest-sha256 requires a value (use --manifest-sha256=HEX)"
+    exit 2
+  when "-h", "--help"
+    puts "usage: pub_grub-check CERTIFICATE.json [--manifest-sha256 HEX]"
+    exit 0
+  else
+    args << arg
+  end
+end
+
+if args.length != 1
+  warn "usage: pub_grub-check CERTIFICATE.json [--manifest-sha256 HEX]"
+  exit 2
+end
+
+begin
+  certificate = PubGrub::Certificate.load_file(args[0])
+rescue Errno::ENOENT, JSON::ParserError, ArgumentError => e
+  warn "INVALID: cannot read certificate: #{e.message}"
+  exit 1
+end
+
+begin
+  PubGrub::CertificateChecker.new(certificate, manifest_sha256: pinned_digest).verify
+rescue PubGrub::CertificateChecker::Invalid => e
+  warn "INVALID: #{e.message}"
+  exit 1
+end
+
+puts "OK: certificate is valid; the contradiction is derived from the root request"
+puts "    manifest sha256: #{certificate.manifest_sha256}"
+puts "    derivations checked: #{certificate.incompatibilities.length}"

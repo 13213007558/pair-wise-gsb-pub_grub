@@ -26,6 +26,48 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+## Unsatisfiability certificates
+
+When no solution exists, `SolveFailure` carries a human-readable
+explanation and, when the failure was raised by `VersionSolver`, a
+machine-readable certificate proving that no solution exists:
+
+``` ruby
+begin
+  solver.solve
+rescue PubGrub::SolveFailure => e
+  e.explanation           # human-readable conflict explanation
+  e.certificate.to_json   # machine-readable proof of unsatisfiability
+end
+```
+
+A certificate contains:
+
+* a frozen manifest of every package version the proof depends on,
+  together with the original dependencies of each version and of the
+  root request, pinned by a SHA-256 digest,
+* every derivation step: dependencies and missing-version facts taken
+  from the manifest, and each conflict-merge performed by the solver,
+* the conclusion: the final contradiction.
+
+Certificates can be checked independently, without re-running the
+solver. The checker only replays the local derivation steps and
+verifies that the final contradiction follows from the root request:
+
+``` ruby
+PubGrub::CertificateChecker.verify(PubGrub::Certificate.load(json)) # => true
+```
+
+or from the command line:
+
+``` console
+$ pub_grub-check certificate.json [--manifest-sha256 HEX]
+```
+
+Tampering with a version range, removing a premise, referencing a
+nonexistent derivation, or presenting a conflict that does not follow
+from the root request are all rejected.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
