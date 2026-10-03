@@ -26,6 +26,25 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+## Machine-verifiable failure proofs
+
+When solving fails, `SolveFailure#proof` contains a self-contained certificate.
+It includes a digest of the frozen package-version manifest, the original root
+request, the raw dependencies for every package version used by the proof, and
+every external premise and conflict-resolution step.
+
+The audit entrypoint performs only local checks and never reruns the search:
+
+``` ruby
+PubGrub::ProofChecker.verify(failure.proof)
+```
+
+A standalone CLI is also available:
+
+```sh
+bin/pub_grub_verify_proof failure-proof.json
+```
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.

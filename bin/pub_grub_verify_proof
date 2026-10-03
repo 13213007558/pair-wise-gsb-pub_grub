@@ -1,0 +1,17 @@
+#!/usr/bin/env ruby
+
+require "json"
+require_relative "../lib/pub_grub/proof_checker"
+
+path = ARGV.fetch(0) do
+  warn "usage: pub_grub_verify_proof PROOF.json"
+  exit 2
+end
+
+begin
+  result = PubGrub::ProofChecker.load(path).verify
+  puts JSON.generate("valid" => true, "root" => result.root)
+rescue StandardError => error
+  puts JSON.generate("valid" => false, "error" => error.message)
+  exit 1
+end

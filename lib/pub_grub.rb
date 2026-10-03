@@ -8,6 +8,8 @@ require_relative "pub_grub/version_solver"
 require_relative "pub_grub/incompatibility"
 require_relative 'pub_grub/solve_failure'
 require_relative 'pub_grub/failure_writer'
+require_relative 'pub_grub/failure_proof'
+require_relative 'pub_grub/proof_checker'
 require_relative 'pub_grub/version'
 
 module PubGrub

@@ -1,6 +1,6 @@
 module PubGrub
   class Incompatibility
-    ConflictCause = Struct.new(:incompatibility, :satisfier) do
+    ConflictCause = Struct.new(:incompatibility, :satisfier, :resolution_term, :most_recent_term) do
       alias_method :conflict, :incompatibility
       alias_method :other, :satisfier
     end
@@ -49,7 +49,7 @@ module PubGrub
           cause.other
         ].flat_map(&:external_incompatibilities)
       else
-        [this]
+        [self]
       end
     end
 

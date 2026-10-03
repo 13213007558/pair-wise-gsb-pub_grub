@@ -207,7 +207,15 @@ module PubGrub
           new_terms << difference.invert
         end
 
-        new_incompatibility = Incompatibility.new(new_terms, cause: Incompatibility::ConflictCause.new(incompatibility, most_recent_satisfier.cause))
+        new_incompatibility = Incompatibility.new(
+          new_terms,
+          cause: Incompatibility::ConflictCause.new(
+            incompatibility,
+            most_recent_satisfier.cause,
+            most_recent_satisfier.term,
+            most_recent_term
+          )
+        )
 
         if incompatibility.to_s == new_incompatibility.to_s
           logger.info { "!! failed to resolve conflicts, this shouldn't have happened" }
@@ -222,7 +230,7 @@ module PubGrub
         logger.info { "! thus #{incompatibility}" }
       end
 
-      raise SolveFailure.new(incompatibility)
+      raise SolveFailure.new(incompatibility, source: @source)
     end
 
     def add_incompatibility(incompatibility)

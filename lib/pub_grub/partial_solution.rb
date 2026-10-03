@@ -33,10 +33,9 @@ module PubGrub
     end
 
     def satisfier(term)
-      assignment =
-        @assignments_by[term.package].bsearch do |assignment_by|
-          @cumulative_assignments[assignment_by].satisfies?(term)
-        end
+      assignment = @assignments_by[term.package].find do |assignment_by|
+        @cumulative_assignments[assignment_by].satisfies?(term)
+      end
 
       assignment || raise("#{term} unsatisfied")
     end
