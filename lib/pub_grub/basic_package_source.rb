@@ -114,6 +114,16 @@ module PubGrub
       Incompatibility.new([unsatisfied_term], cause: cause)
     end
 
+    # Splits a raw solution (a package => version hash, as returned by
+    # VersionSolver#solve) into the real packages and the provisions of
+    # any capabilities. Sources without capabilities simply have no
+    # provisions to report.
+    #
+    # Returns: { packages: { package => version }, capabilities: {} }
+    def describe_solution(decisions)
+      { packages: decisions, capabilities: {} }
+    end
+
     def incompatibilities_for(package, version)
       package_deps = @cached_dependencies[package]
       sorted_versions = @sorted_versions[package]

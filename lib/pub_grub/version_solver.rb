@@ -64,6 +64,15 @@ module PubGrub
 
     alias_method :result, :solve
 
+    # The final solution, split into the selected real packages and the
+    # capability provisions (which provider was chosen for each
+    # capability). See BasicPackageSource#describe_solution.
+    def solution_report
+      solve
+
+      source.describe_solution(solution.decisions)
+    end
+
     private
 
     def propagate(initial_package)

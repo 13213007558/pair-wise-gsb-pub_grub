@@ -26,6 +26,43 @@ solver = PubGrub::VersionSolver.new(source: source)
 solver.solve # => {#<PubGrub::Package :root>=>0, "foo"=>#<Gem::Version "1.0.0">}
 ```
 
+### Capabilities (virtual packages)
+
+`StaticPackageSource` also supports capabilities: a named feature (with its
+own version numbering, independent from any package version) that can be
+provided by several real packages. Dependents ask for the capability, and
+the solver chooses a provider, backtracking to another provider when the
+first choice conflicts downstream.
+
+``` ruby
+source = PubGrub::StaticPackageSource.new do |s|
+  s.root deps: { 'image-reader' => '>= 2.0' }
+
+  # Each provider declares which capability versions it offers
+  s.add 'fast-image', '1.0.0', deps: { 'fast-codec' => '~> 2.0' }, provides: { 'image-reader' => '2.1.0' }
+  s.add 'mini-image', '1.0.0', provides: { 'image-reader' => '2.0.0' }, conflicts: ['fast-image']
+end
+
+solver = PubGrub::VersionSolver.new(source: source)
+solver.solve # => {"image-reader"=>2.1.0 (provided by fast-image), "fast-image"=>1.0.0, ...}
+
+# The final solution split into real packages and capability provisions
+solver.solution_report
+# => {
+#      packages: { "fast-image" => #<Gem::Version "1.0.0">, ... },
+#      capabilities: { "image-reader" => { version: 2.1.0, provider: "fast-image", provider_version: 1.0.0 } }
+#    }
+```
+
+- `provides:` maps capability names to the provided capability version.
+  Capability versions are independent from the provider's own versions.
+- The solver prefers higher capability versions, and a selected provider's
+  own dependencies must still be satisfied.
+- `conflicts:` declares mutually exclusive packages which cannot be
+  selected together.
+- Failure explanations name the providers that were ruled out, e.g.
+  `image-reader >= 2.1.0 (provided by fast-image) depends on fast-image = 1.0.0`.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.

@@ -1,5 +1,6 @@
 require_relative "pub_grub/package"
 require_relative "pub_grub/static_package_source"
+require_relative "pub_grub/capability_version"
 require_relative "pub_grub/term"
 require_relative "pub_grub/version_range"
 require_relative "pub_grub/version_constraint"
